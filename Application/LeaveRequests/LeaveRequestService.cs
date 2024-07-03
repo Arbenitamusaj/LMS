@@ -1,7 +1,9 @@
-﻿using EcommerceDomain.LeaveAllovations;
+﻿using EcommerceApplication.Email;
+using EcommerceDomain.LeaveAllovations;
 using EcommerceDomain.LeaveRequests;
 using LMS.Application.Interfaces;
 using LMS.Domain.Employees;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,14 +42,15 @@ namespace EcommerceApplication.LeaveRequests
             };
 
             _unitOfWork.Repository<LeaveRequest>().Create(leaveRequest);
-            await _unitOfWork.SaveChangesAsync();
+            _unitOfWork.Complete();
 
+            // Send email notification to lead
             await SendLeaveRequestNotificationAsync(employeeId, leaveRequest.Id);
         }
 
         public async Task<bool> ApproveLeaveRequestAsync(int leaveRequestId, string approvedById)
         {
-            var leaveRequest = await _unitOfWork.Repository<LeaveRequest>().GetByIdAsync(leaveRequestId);
+            var leaveRequest = await _unitOfWork.Repository<LeaveRequest>().GetByCondition(lr => lr.Id == leaveRequestId).FirstOrDefaultAsync();
             if (leaveRequest == null)
                 return false;
 
@@ -55,8 +58,9 @@ namespace EcommerceApplication.LeaveRequests
             leaveRequest.ApprovedById = approvedById;
 
             _unitOfWork.Repository<LeaveRequest>().Update(leaveRequest);
-            await _unitOfWork.SaveChangesAsync();
+            _unitOfWork.Complete();
 
+            // Subtract approved days from leave allocation
             await SubtractLeaveDaysAsync(leaveRequest.EmployeeId, leaveRequest.LeaveTypeId, (leaveRequest.EndDate - leaveRequest.StartDate).Days);
 
             return true;
@@ -64,22 +68,22 @@ namespace EcommerceApplication.LeaveRequests
 
         public async Task<bool> CancelLeaveRequestAsync(int leaveRequestId)
         {
-            var leaveRequest = await _unitOfWork.Repository<LeaveRequest>().GetByIdAsync(leaveRequestId);
+            var leaveRequest = await _unitOfWork.Repository<LeaveRequest>().GetByCondition(lr => lr.Id == leaveRequestId).FirstOrDefaultAsync();
             if (leaveRequest == null)
                 return false;
 
             _unitOfWork.Repository<LeaveRequest>().Delete(leaveRequest);
-            await _unitOfWork.SaveChangesAsync();
+            _unitOfWork.Complete();
 
             return true;
         }
 
         private async Task SendLeaveRequestNotificationAsync(string employeeId, int leaveRequestId)
         {
-            var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+            var employee = await _unitOfWork.Repository<Employee>().GetByCondition(e => e.Id == employeeId).FirstOrDefaultAsync();
             if (employee != null && !string.IsNullOrEmpty(employee.LeadId))
             {
-                var lead = await _unitOfWork.Repository<Employee>().GetByIdAsync(employee.LeadId);
+                var lead = await _unitOfWork.Repository<Employee>().GetByCondition(e => e.Id == employee.LeadId).FirstOrDefaultAsync();
                 if (lead != null)
                 {
                     var emailSubject = $"Leave Request Submission - Employee: {employee.Name}";
@@ -96,7 +100,7 @@ namespace EcommerceApplication.LeaveRequests
             {
                 allocation.NumberOfDays -= days;
                 _unitOfWork.Repository<LeaveAllocation>().Update(allocation);
-                await _unitOfWork.SaveChangesAsync();
+                _unitOfWork.Complete();
             }
         }
     }
